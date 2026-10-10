@@ -224,23 +224,43 @@ async function enhance(env, subjectB64, refB64) {
   try {
     const subjBytes = b64ToBytes(subjectB64);
     const refBytes = b64ToBytes(refB64);
-    console.log('AI call:', subjBytes.length, refBytes.length);
+
+    console.log('Sizes:', subjBytes.length, refBytes.length);
+
+    // ⚠️ WAJIB: FormData, bukan JSON
+    const form = new FormData();
+    form.append('input_image_0', new Blob([subjBytes], { type: 'image/jpeg' }), 'subject.jpg');
+    form.append('input_image_1', new Blob([refBytes], { type: 'image/jpeg' }), 'reference.jpg');
+    form.append('prompt', 'Take the exact subject, composition and content from image 0. Apply the quality, sharpness, detail, lighting and visual fidelity from image 1.');
+    form.append('width', '1024');
+    form.append('height', '1024');
+
+    // Serialize FormData supaya dapat multipart boundary
+    const formResponse = new Response(form);
+    const formStream = formResponse.body;
+    const formContentType = formResponse.headers.get('content-type');
+
+    console.log('Calling FLUX.2 klein 9B (multipart)...');
 
     const r = await env.AI.run('@cf/black-forest-labs/flux-2-klein-9b', {
-      prompt: 'Take exact subject from image 0. Apply quality, sharpness, detail from image 1. Keep subject identical.',
-      input_images: [Array.from(subjBytes), Array.from(refBytes)],
-      width: 1024,
-      height: 1024,
-      num_steps: 28
+      multipart: {
+        body: formStream,
+        contentType: formContentType
+      }
     });
 
-    console.log('Response:', typeof r, r ? Object.keys(r) : 'null');
+    console.log('Response type:', typeof r);
+    console.log('Response keys:', r ? Object.keys(r) : 'null');
+
+    // Response format: { image: "base64string" }
     if (r && r.image) return r.image;
     if (typeof r === 'string') return r;
+
     lastAIError = 'RESPONSE: ' + JSON.stringify(r).slice(0, 250);
     return null;
   } catch (e) {
     lastAIError = 'CATCH: ' + e.message;
+    console.error('AI error:', e.message);
     return null;
   }
 }
