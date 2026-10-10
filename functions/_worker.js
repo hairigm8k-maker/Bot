@@ -1,40 +1,105 @@
-// Telegram Bot — Image Enhancement
+// ═══════════════════════════════════════════
+// Telegram Image Enhancement Bot
+// Cloudflare Pages Advanced Mode Worker
+// ═══════════════════════════════════════════
+
 let lastAIError = null;
-// Cloudflare Pages Function
 
-export async function onRequest(context) {
-  const { request, env } = context;
-  const url = new URL(request.url);
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    const path = url.pathname;
 
-  if (url.pathname === '/webhook' && request.method === 'POST') {
-    return handleWebhook(request, env);
+    // Route: /api/test-models
+    if (path === '/api/test-models') {
+      return await handleTestModels(env);
+    }
+
+    // Route: /info
+    if (path === '/info') {
+      return json({
+        bot: 'Telegram Image Bot',
+        status: 'running',
+        token_set: !!env.TELEGRAM_BOT_TOKEN,
+        kv_bound: !!env.BOT_KV,
+        ai_bound: !!env.AI
+      });
+    }
+
+    // Route: /setup
+    if (path === '/setup') {
+      return await handleSetup(url, env);
+    }
+
+    // Route: /webhook
+    if (path === '/webhook' && request.method === 'POST') {
+      return await handleWebhook(request, env);
+    }
+
+    // Default
+    return new Response('Telegram Image Bot — Running 🤖', {
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+    });
   }
+};
 
-  if (url.pathname === '/setup') {
-    return setupWebhook(request, env);
-  }
-
-  if (url.pathname === '/info') {
-    return new Response(JSON.stringify({
-      bot: 'Telegram Image Bot',
-      status: 'running',
-      token_set: !!env.TELEGRAM_BOT_TOKEN,
-      kv_bound: !!env.BOT_KV,
-      ai_bound: !!env.AI
-    }, null, 2), { headers: { 'Content-Type': 'application/json' } });
-  }
-
-  return new Response('Telegram Image Bot — Running 🤖', {
-    status: 200,
-    headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+// ═══════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data, null, 2), {
+    status,
+    headers: { 'Content-Type': 'application/json' }
   });
 }
 
-// ============================================
+// ═══════════════════════════════════════════
+// TEST MODELS
+// ═══════════════════════════════════════════
+async function handleTestModels(env) {
+  const models = [
+    '@cf/black-forest-labs/flux-1-schnell',
+    '@cf/black-forest-labs/flux-2-klein-9b',
+    '@cf/stabilityai/stable-diffusion-xl-base-1.0',
+    '@cf/bytedance/stable-diffusion-xl-lightning',
+    '@cf/lykon/dreamshaper-8-lcm',
+    '@cf/runwayml/stable-diffusion-v1-5-img2img'
+  ];
+
+  const results = [];
+  for (const model of models) {
+    const start = Date.now();
+    try {
+      const r = await env.AI.run(model, { prompt: 'red apple', num_steps: 4 });
+      results.push({
+        model,
+        ok: true,
+        ms: Date.now() - start,
+        keys: r ? Object.keys(r) : [],
+        hasImage: !!(r && r.image)
+      });
+    } catch (e) {
+      results.push({
+        model,
+        ok: false,
+        ms: Date.now() - start,
+        error: e.message
+      });
+    }
+  }
+
+  return json({
+    total: models.length,
+    ok: results.filter(r => r.ok).length,
+    failed: results.filter(r => !r.ok).length,
+    results
+  });
+}
+
+// ═══════════════════════════════════════════
 // SETUP WEBHOOK
-// ============================================
-async function setupWebhook(request, env) {
-  const url = new URL(request.url);
+// ═══════════════════════════════════════════
+async function handleSetup(url, env) {
   const webhookUrl = `${url.protocol}//${url.host}/webhook`;
 
   const res = await fetch(
@@ -42,24 +107,17 @@ async function setupWebhook(request, env) {
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url: webhookUrl,
-        drop_pending_updates: true
-      })
+      body: JSON.stringify({ url: webhookUrl, drop_pending_updates: true })
     }
   );
 
   const data = await res.json();
-
-  return new Response(JSON.stringify({
-    webhook_url: webhookUrl,
-    telegram_response: data
-  }, null, 2), { headers: { 'Content-Type': 'application/json' } });
+  return json({ webhook_url: webhookUrl, telegram_response: data });
 }
 
-// ============================================
+// ═══════════════════════════════════════════
 // WEBHOOK HANDLER
-// ============================================
+// ═══════════════════════════════════════════
 async function handleWebhook(request, env) {
   let update;
   try {
@@ -75,6 +133,7 @@ async function handleWebhook(request, env) {
   const userId = message.from.id;
 
   try {
+    // COMMANDS
     if (message.text) {
       const text = message.text.trim();
 
@@ -84,12 +143,9 @@ async function handleWebhook(request, env) {
           '📸 Cara guna:\n' +
           '1. Hantar gambar yang nak enhance (Gambar 1)\n' +
           '2. Hantar gambar rujukan kualiti tinggi (Gambar 2)\n' +
-          '3. AI akan apply kualiti Gambar 2 ke Gambar 1\n' +
+          '3. AI apply kualiti Gambar 2 ke Gambar 1\n' +
           '4. Terima hasil dalam 10-30 saat\n\n' +
-          '📋 Commands:\n' +
-          '/start - Mula\n' +
-          '/reset - Reset & mula baru\n' +
-          '/help - Bantuan'
+          '📋 Commands: /start /reset /help'
         );
         await clearState(env, userId);
         return new Response('OK');
@@ -98,15 +154,10 @@ async function handleWebhook(request, env) {
       if (text === '/help') {
         await sendMessage(env, chatId,
           '🤖 Bot Enhancement Gambar\n\n' +
-          'Bot ni guna AI untuk improve kualiti gambar.\n\n' +
-          'Cara guna:\n' +
           '1. Hantar Gambar 1 (nak enhance)\n' +
           '2. Hantar Gambar 2 (rujukan kualiti tinggi)\n' +
           '3. AI process\n' +
-          '4. Terima hasil\n\n' +
-          'Tips:\n' +
-          '• Guna gambar clear untuk rujukan\n' +
-          '• Result bergantung pada AI'
+          '4. Terima hasil'
         );
         return new Response('OK');
       }
@@ -121,7 +172,7 @@ async function handleWebhook(request, env) {
       return new Response('OK');
     }
 
-    // ===== PHOTOS =====
+    // PHOTOS
     if (message.photo && message.photo.length > 0) {
       const state = await getState(env, userId);
       const largestPhoto = message.photo[message.photo.length - 1];
@@ -161,7 +212,7 @@ async function handleWebhook(request, env) {
 
         await sendMessage(env, chatId,
           '🎨 AI sedang process...\n\n' +
-          '⏱️ Ini ambil masa 10-30 saat. Sila tunggu.'
+          '⏱️ Ambil masa 10-30 saat. Sila tunggu.'
         );
 
         const resultBase64 = await enhanceImage(env, state.image1, image2Base64);
@@ -169,14 +220,12 @@ async function handleWebhook(request, env) {
         if (resultBase64) {
           await sendPhotoBase64(env, chatId, resultBase64);
           await sendMessage(env, chatId,
-            '✅ Siap! 🎉\n\n' +
-            'Hantar /reset untuk process gambar baru.'
+            '✅ Siap! 🎉\n\nHantar /reset untuk process gambar baru.'
           );
         } else {
-          const errDetail = lastAIError || 'Unknown error';
           await sendMessage(env, chatId,
             '❌ Maaf, gagal generate.\n\n' +
-            'Error: ' + errDetail.slice(0, 200) + '\n\n' +
+            'Error: ' + String(lastAIError || 'unknown').slice(0, 300) + '\n\n' +
             'Cuba /reset dan hantar semula.'
           );
         }
@@ -199,17 +248,14 @@ async function handleWebhook(request, env) {
   return new Response('OK');
 }
 
-// ============================================
+// ═══════════════════════════════════════════
 // TELEGRAM API
-// ============================================
+// ═══════════════════════════════════════════
 async function sendMessage(env, chatId, text) {
   await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text: text
-    })
+    body: JSON.stringify({ chat_id: chatId, text })
   });
 }
 
@@ -252,9 +298,9 @@ async function downloadImageAsBase64(env, fileId) {
   }
 }
 
-// ============================================
-// STATE MANAGEMENT (KV)
-// ============================================
+// ═══════════════════════════════════════════
+// STATE (KV)
+// ═══════════════════════════════════════════
 async function getState(env, userId) {
   try {
     const state = await env.BOT_KV.get(`user:${userId}`);
@@ -274,20 +320,22 @@ async function clearState(env, userId) {
   await env.BOT_KV.delete(`user:${userId}`);
 }
 
-// ============================================
+// ═══════════════════════════════════════════
 // AI — IMAGE ENHANCEMENT
-// ============================================
+// ═══════════════════════════════════════════
 async function enhanceImage(env, subjectBase64, referenceBase64) {
+  lastAIError = null;
+
   try {
     const subjectBytes = base64ToBytes(subjectBase64);
     const referenceBytes = base64ToBytes(referenceBase64);
 
-    console.log('Calling FLUX.2 [klein] 9B with 2 images...');
+    console.log('AI call — subject:', subjectBytes.length, 'ref:', referenceBytes.length);
 
     const response = await env.AI.run(
       '@cf/black-forest-labs/flux-2-klein-9b',
       {
-        prompt: 'Take the exact subject, composition, and content from image 0. Apply the quality level, sharpness, detail, clarity, lighting, and visual fidelity from image 1. Keep the subject of image 0 identical but render it with the professional quality and crisp detail of image 1.',
+        prompt: 'Take the exact subject and composition from image 0. Apply the quality, sharpness, detail, clarity, lighting, and visual fidelity from image 1. Keep the subject identical but render with professional quality.',
         input_images: [Array.from(subjectBytes), Array.from(referenceBytes)],
         width: 1024,
         height: 1024,
@@ -295,7 +343,8 @@ async function enhanceImage(env, subjectBase64, referenceBase64) {
       }
     );
 
-    console.log('AI response keys:', Object.keys(response || {}));
+    console.log('AI response type:', typeof response);
+    console.log('AI response keys:', response ? Object.keys(response) : 'null');
 
     if (response && response.image) {
       return response.image;
@@ -305,17 +354,19 @@ async function enhanceImage(env, subjectBase64, referenceBase64) {
       return response;
     }
 
-    console.error('Unexpected AI response:', JSON.stringify(response).slice(0, 300));
+    lastAIError = 'RESPONSE: ' + JSON.stringify(response).slice(0, 250);
     return null;
+
   } catch (error) {
-    console.error('AI generation error:', error.message);
+    lastAIError = 'CATCH: ' + error.message;
+    console.error('AI error:', error.message);
     return null;
   }
 }
 
-// ============================================
+// ═══════════════════════════════════════════
 // UTILS
-// ============================================
+// ═══════════════════════════════════════════
 function arrayBufferToBase64(buffer) {
   const bytes = new Uint8Array(buffer);
   let binary = '';
