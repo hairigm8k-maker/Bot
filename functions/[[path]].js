@@ -231,7 +231,23 @@ async function enhance(env, subjectB64, refB64) {
     const form = new FormData();
     form.append('input_image_0', new Blob([subjBytes], { type: 'image/jpeg' }), 'subject.jpg');
     form.append('input_image_1', new Blob([refBytes], { type: 'image/jpeg' }), 'reference.jpg');
-    form.append('prompt', 'Take the exact subject, composition and content from image 0. Apply the quality, sharpness, detail, lighting and visual fidelity from image 1.');
+    form.append('prompt', [
+        'ENHANCE image 0. This is a quality restoration task.',
+        'STRICT RULES:',
+        '- Keep the EXACT same person, face, pose, clothing, and background as image 0.',
+        '- Do NOT swap faces. Do NOT change the identity.',
+        '- Do NOT add new objects, people, or scenery.',
+        '- Preserve the exact composition and framing.',
+        '',
+        'ONLY IMPROVE:',
+        '- Sharpness and clarity (make it crisp, HD)',
+        '- Detail and texture quality',
+        '- Lighting balance from image 1',
+        '- Color grading inspiration from image 1',
+        '- Overall visual fidelity',
+        '',
+        'Output: The same photo of image 0, but enhanced to professional HD quality.'
+      ].join(' '));
     form.append('width', '1024');
     form.append('height', '1024');
 
