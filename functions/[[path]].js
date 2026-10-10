@@ -1,4 +1,5 @@
 // Telegram Bot — Image Enhancement
+let lastAIError = null;
 // Cloudflare Pages Function
 
 export async function onRequest(context) {
@@ -172,8 +173,10 @@ async function handleWebhook(request, env) {
             'Hantar /reset untuk process gambar baru.'
           );
         } else {
+          const errDetail = lastAIError || 'Unknown error';
           await sendMessage(env, chatId,
             '❌ Maaf, gagal generate.\n\n' +
+            'Error: ' + errDetail.slice(0, 200) + '\n\n' +
             'Cuba /reset dan hantar semula.'
           );
         }
